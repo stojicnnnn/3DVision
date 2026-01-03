@@ -1,0 +1,8 @@
+
+generate_history*.py
+simulate_history*.sh
+backup_source/
+build/
+*.o
+*.out
+

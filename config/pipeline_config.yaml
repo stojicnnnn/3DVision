@@ -1,0 +1,58 @@
+# Pipeline Configuration
+# All paths should be absolute or relative to the build directory.
+
+camera:
+  width: 1280
+  height: 720
+
+depth:
+  scale_to_meters: 1000.0    # Raw depth units per meter (1000 = mm)
+  clipping_max: 1.5          # Max depth in meters
+  bilateral_filter: false
+
+registration:
+  voxel_size: 0.001           # Voxel size for downsampling (meters)
+  ransac_max_iterations: 100000
+  icp_max_iterations: 200
+  min_fitness: 0.3            # Minimum acceptable ICP fitness score
+
+robot:
+  ip: "192.168.1.184"
+  speed: 80                   # Motion speed in mm/s
+  approach_offset_z: -0.101   # Z offset for approach pose (meters)
+
+segmentation:
+  sam_server_url: "http://192.168.2.168:8090/sam2"
+  sam_query: "Segment the circular grey metallic caps,1 instance at a time, in order"
+  masks_input_dir: ""         # Path to pre-saved mask images (fallback)
+  apply_mask: true
+
+reference_model_path: ""      # Path to reference .ply model
+
+use_camera: false   # Set to false to use dummy data
+use_robot: false    # Set to false to skip robot connection
+
+dummy_data:
+  rgb_path: ""      # Leave empty to generate procedural dummy data
+  depth_path: ""
+use_gpu: true
+visualization: "opengl"       # "opengl" or "none"
+
+# Camera extrinsics (4x4 row-major, from hand-eye calibration)
+camera_extrinsics:
+  - 0.00705456
+  - 0.99996948
+  - -0.00335601
+  - 0.43244419
+  - 0.99984465
+  - -0.00710781
+  - -0.01612942
+  - -0.03129219
+  - -0.01615278
+  - -0.0032417
+  - -0.99986428
+  - 0.39502932
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.0

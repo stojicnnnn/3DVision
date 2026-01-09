@@ -32,3 +32,4 @@ make -j$(nproc)
 - Left Click: Rotate
 - Middle Click: Pan
 - Scroll: Zoom
+

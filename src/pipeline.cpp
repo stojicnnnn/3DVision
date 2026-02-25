@@ -21,7 +21,6 @@ Pipeline::Pipeline(const PipelineConfig& config)
 
 Pipeline::~Pipeline() = default;
 
-// ─── Process a single segmentation instance ───
 
 std::optional<Eigen::Matrix4f> Pipeline::processInstance(
     const cv::Mat& mask,
@@ -36,22 +35,17 @@ std::optional<Eigen::Matrix4f> Pipeline::processInstance(
     std::cout << "\n--- Processing instance " << instance_id << " ---\n";
 
     try {
-        // 1. Resize mask if needed
         cv::Mat resized_mask = mask;
         if (mask.rows != depth.rows || mask.cols != depth.cols) {
             cv::resize(mask, resized_mask, depth.size(), 0, 0, cv::INTER_NEAREST);
         }
-
-        // 2. GPU depth preprocessing (scale + mask)
         cv::Mat scaled_depth;
         if (config_.use_gpu && GPUDepth::isCudaAvailable()) {
             scaled_depth = GPUDepth::preprocess(depth, resized_mask, config_.depth.scale_to_meters);
         } else {
-            // CPU fallback
             cv::Mat float_depth;
             depth.convertTo(float_depth, CV_32FC1, 1.0 / config_.depth.scale_to_meters);
 
-            // Apply mask
             if (config_.segmentation.apply_mask && !resized_mask.empty()) {
                 cv::Mat mask_bool;
                 cv::threshold(resized_mask, mask_bool, 10, 255, cv::THRESH_BINARY);
@@ -60,13 +54,10 @@ std::optional<Eigen::Matrix4f> Pipeline::processInstance(
             scaled_depth = float_depth;
         }
 
-        // Check for valid depth data
-        if (cv::countNonZero(scaled_depth) == 0) {
+            if (cv::countNonZero(scaled_depth) == 0) {
             std::cerr << "Instance " << instance_id << ": empty depth after masking\n";
             return std::nullopt;
         }
-
-        // 3. GPU point cloud generation
         float fx = intrinsics(0, 0), fy = intrinsics(1, 1);
         float cx = intrinsics(0, 2), cy = intrinsics(1, 2);
 
@@ -74,7 +65,6 @@ std::optional<Eigen::Matrix4f> Pipeline::processInstance(
         if (config_.use_gpu && GPUDepth::isCudaAvailable()) {
             pcd = GPUPointCloud::generate(scaled_depth, rgb, fx, fy, cx, cy);
         } else {
-            // CPU deprojection
             for (int v = 0; v < scaled_depth.rows; ++v) {
                 for (int u = 0; u < scaled_depth.cols; ++u) {
                     float z = scaled_depth.at<float>(v, u);
@@ -99,13 +89,11 @@ std::optional<Eigen::Matrix4f> Pipeline::processInstance(
         }
         std::cout << "Instance " << instance_id << ": " << pcd.size() << " points\n";
 
-        // 4. Downsample and compute features
         PointCloud source_down = Registration::voxelDownsample(pcd, config_.registration.voxel_size);
         Registration::estimateNormals(source_down, 30);
         FPFHFeatures source_features = Registration::computeFPFH(
             source_down, config_.registration.voxel_size * 5.0f);
 
-        // 5. RANSAC coarse registration
         RegistrationResult coarse = Registration::ransacRegistration(
             source_down, ref_cloud, source_features, ref_features,
             config_.registration.voxel_size,
@@ -113,7 +101,6 @@ std::optional<Eigen::Matrix4f> Pipeline::processInstance(
             config_.registration.ransac_confidence
         );
 
-        // 6. ICP refinement
         float icp_threshold = config_.registration.voxel_size * config_.registration.icp_distance_factor;
         RegistrationResult refined;
 
@@ -137,7 +124,6 @@ std::optional<Eigen::Matrix4f> Pipeline::processInstance(
                       << ": low fitness " << refined.fitness << "\n";
         }
 
-        // 7. Compute world pose
         Eigen::Matrix4f T_camera_object = refined.transformation.inverse();
         Eigen::Matrix4f T_world_object = config_.camera_extrinsics * T_camera_object;
 
@@ -154,7 +140,6 @@ std::optional<Eigen::Matrix4f> Pipeline::processInstance(
     }
 }
 
-// ─── Duplicate waypoint filter ───
 
 std::vector<Eigen::Matrix4f> Pipeline::filterDuplicates(
     const std::vector<Eigen::Matrix4f>& waypoints,
@@ -170,7 +155,6 @@ std::vector<Eigen::Matrix4f> Pipeline::filterDuplicates(
             float dist = (pos - filtered[i].block<3,1>(0,3)).norm();
             if (dist < min_distance) {
                 is_dup = true;
-                // Keep the one closer to origin
                 float existing_dist = filtered[i].block<3,1>(0,3).norm();
                 float current_dist  = pos.norm();
                 if (current_dist < existing_dist) {
@@ -186,7 +170,6 @@ std::vector<Eigen::Matrix4f> Pipeline::filterDuplicates(
     return filtered;
 }
 
-// ─── Main pipeline ───
 
 void Pipeline::run() {
     auto pipeline_start = std::chrono::high_resolution_clock::now();
@@ -195,7 +178,6 @@ void Pipeline::run() {
     cv::Mat rgb, depth;
     Eigen::Matrix3f K = Eigen::Matrix3f::Identity();
 
-    // 1. Acquisition
     if (config_.use_camera) {
         std::cout << "\n[1/5] Camera capture (RealSense)...\n";
         RealSenseCamera camera(config_.camera.width, config_.camera.height);
@@ -208,18 +190,15 @@ void Pipeline::run() {
     } else {
         std::cout << "\n[1/5] Using dummy data...\n";
         
-        // Try loading from file
         if (!config_.dummy_rgb_path.empty() && !config_.dummy_depth_path.empty()) {
             rgb = cv::imread(config_.dummy_rgb_path, cv::IMREAD_COLOR);
             depth = cv::imread(config_.dummy_depth_path, cv::IMREAD_UNCHANGED);
             
-            // Default intrinsics for 1280x720 generic camera
             K << 900, 0, 640,
                  0, 900, 360,
                  0, 0, 1;
         } 
         
-        // Procedural generation if loading failed or paths empty
         if (rgb.empty() || depth.empty()) {
             std::cout << "Generating procedural test scene...\n";
             int w = config_.camera.width;
@@ -227,32 +206,25 @@ void Pipeline::run() {
             rgb = cv::Mat(h, w, CV_8UC3, cv::Scalar(50, 50, 50));
             depth = cv::Mat(h, w, CV_16UC1, cv::Scalar(0));
 
-            // Intrinsic parameters
             float fx = 900, fy = 900, cx = w/2.0f, cy = h/2.0f;
             K << fx, 0, cx,
                  0, fy, cy,
                  0, 0, 1;
-
-            // Generate a floor plane at Z=1.0m and a box at Z=0.8m
             float floor_z = 1.0f;
             float box_z = 0.8f;
             
             for (int v = 0; v < h; ++v) {
                 for (int u = 0; u < w; ++u) {
-                    // Floor
                     float z = floor_z;
                     
-                    // Box in center
                     if (abs(u - cx) < 100 && abs(v - cy) < 100) {
                         z = box_z;
                         rgb.at<cv::Vec3b>(v, u) = cv::Vec3b(0, 0, 255); // Red box
                     } else {
-                        // Checkerboard floor
                         if (((u / 50) + (v / 50)) % 2 == 0) 
                             rgb.at<cv::Vec3b>(v, u) = cv::Vec3b(200, 200, 200);
                     }
 
-                    // Convert meters to generic depth units (assuming scale 1000)
                     unsigned short d_val = static_cast<unsigned short>(z * config_.depth.scale_to_meters);
                     depth.at<unsigned short>(v, u) = d_val;
                 }
@@ -265,9 +237,7 @@ void Pipeline::run() {
         return;
     }
 
-    // 2. Segmentation
     std::cout << "\n[2/5] Segmentation...\n";
-    // If using dummy data and no masks provided, generate a dummy mask for the center box
     std::vector<cv::Mat> masks;
     if (!config_.use_camera && config_.segmentation.masks_input_dir.empty()) {
         std::cout << "Generating dummy mask for box...\n";
@@ -291,11 +261,9 @@ void Pipeline::run() {
     }
     std::cout << "Found " << masks.size() << " masks\n";
 
-    // 3. Load reference model
     std::cout << "\n[3/5] Loading reference model...\n";
     PointCloud ref_cloud;
     if (config_.reference_model_path.empty() && !config_.use_camera) {
-        // Generate a dummy reference cloud (a flat square matching the box top)
         std::cout << "Generating dummy reference model...\n";
         for (float x = -0.1f; x <= 0.1f; x += 0.005f) {
             for (float y = -0.1f; y <= 0.1f; y += 0.005f) {
@@ -316,13 +284,11 @@ void Pipeline::run() {
     FPFHFeatures ref_features = Registration::computeFPFH(
         ref_down, config_.registration.voxel_size * 5.0f);
 
-    // 4. Start OpenGL viewer (if enabled)
     if (config_.viz_backend == VizBackend::OPENGL) {
         viewer_ = std::make_unique<GLViewer>();
         viewer_->start();
     }
 
-    // 5. Process all instances in parallel
     std::cout << "\n[4/5] Processing " << masks.size() << " instances (parallel)...\n";
     auto proc_start = std::chrono::high_resolution_clock::now();
 
@@ -334,14 +300,12 @@ void Pipeline::run() {
         ));
     }
 
-    // Collect results
     std::vector<Eigen::Matrix4f> raw_waypoints;
     for (size_t i = 0; i < futures.size(); ++i) {
         auto result = futures[i].get();
         if (result.has_value()) {
             raw_waypoints.push_back(result.value());
 
-            // Update viewer
             if (viewer_ && viewer_->isRunning()) {
                 viewer_->setPose("pose_" + std::to_string(i), result.value());
             }
@@ -352,10 +316,8 @@ void Pipeline::run() {
     float proc_ms = std::chrono::duration<float, std::milli>(proc_end - proc_start).count();
     std::cout << "\nAll instances processed in " << proc_ms << " ms\n";
 
-    // Filter duplicates
     auto final_waypoints = filterDuplicates(raw_waypoints, 0.1f);
 
-    // Update viewer with path
     if (viewer_ && viewer_->isRunning() && !final_waypoints.empty()) {
         std::vector<Eigen::Vector3f> path_positions;
         for (const auto& wp : final_waypoints) {
@@ -364,7 +326,6 @@ void Pipeline::run() {
         viewer_->setPath(path_positions);
     }
 
-    // 6. Robot execution
     if (config_.use_robot) {
         std::cout << "\n[5/5] Robot execution...\n";
         Robot robot(config_.robot.ip);
@@ -384,7 +345,6 @@ void Pipeline::run() {
     float total_ms = std::chrono::duration<float, std::milli>(pipeline_end - pipeline_start).count();
     std::cout << "\n=== Pipeline complete: " << total_ms << " ms ===\n";
 
-    // Keep viewer open if running
     if (viewer_ && viewer_->isRunning()) {
         std::cout << "Viewer is running. Close the window to exit.\n";
         while (viewer_->isRunning()) {
@@ -393,4 +353,4 @@ void Pipeline::run() {
     }
 }
 
-}  // namespace industry_picking
+}

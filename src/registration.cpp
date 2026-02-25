@@ -12,10 +12,6 @@
 
 namespace industry_picking {
 
-// ─────────────────────────────────────────────────
-//  Voxel Downsampling
-// ─────────────────────────────────────────────────
-
 struct VoxelKey {
     int x, y, z;
     bool operator==(const VoxelKey& o) const { return x == o.x && y == o.y && z == o.z; }
@@ -63,9 +59,6 @@ PointCloud Registration::voxelDownsample(const PointCloud& cloud, float voxel_si
     return result;
 }
 
-// ─────────────────────────────────────────────────
-//  KNN helper (brute-force for simplicity; replace with KD-tree for performance)
-// ─────────────────────────────────────────────────
 
 static std::vector<size_t> findKNN(
     const std::vector<Eigen::Vector3f>& points,
@@ -108,9 +101,6 @@ static std::vector<size_t> findRadiusNN(
     return result;
 }
 
-// ─────────────────────────────────────────────────
-//  Normal Estimation
-// ─────────────────────────────────────────────────
 
 void Registration::estimateNormals(PointCloud& cloud, int k) {
     cloud.normals.resize(cloud.size());
@@ -118,7 +108,6 @@ void Registration::estimateNormals(PointCloud& cloud, int k) {
     for (size_t i = 0; i < cloud.size(); ++i) {
         auto neighbors = findKNN(cloud.points, cloud.points[i], k);
 
-        // Compute covariance matrix
         Eigen::Vector3f centroid = Eigen::Vector3f::Zero();
         for (size_t idx : neighbors) centroid += cloud.points[idx];
         centroid /= static_cast<float>(neighbors.size());
@@ -130,11 +119,9 @@ void Registration::estimateNormals(PointCloud& cloud, int k) {
         }
         cov /= static_cast<float>(neighbors.size());
 
-        // Smallest eigenvector = normal
         Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> solver(cov);
         cloud.normals[i] = solver.eigenvectors().col(0);
 
-        // Orient normals towards viewpoint (origin)
         if (cloud.normals[i].dot(-cloud.points[i]) < 0) {
             cloud.normals[i] = -cloud.normals[i];
         }
@@ -142,15 +129,11 @@ void Registration::estimateNormals(PointCloud& cloud, int k) {
     std::cout << "Estimated normals for " << cloud.size() << " points\n";
 }
 
-// ─────────────────────────────────────────────────
-//  FPFH Feature Computation
-// ─────────────────────────────────────────────────
 
 FPFHFeatures Registration::computeFPFH(const PointCloud& cloud, float radius) {
     FPFHFeatures features;
     features.descriptors.resize(cloud.size());
 
-    // SPFH (Simplified Point Feature Histogram)
     auto computeSPFH = [&](size_t idx) -> std::array<float, 33> {
         std::array<float, 33> hist{};
         auto neighbors = findRadiusNN(cloud.points, cloud.points[idx], radius, 100);
@@ -170,7 +153,6 @@ FPFHFeatures Registration::computeFPFH(const PointCloud& cloud, float radius) {
             float phi   = u.dot(diff / dist);
             float theta = std::atan2(w.dot(cloud.normals[ni]), u.dot(cloud.normals[ni]));
 
-            // Bin into 11 bins per feature (33 total)
             int bin_a = std::clamp(static_cast<int>((alpha + 1.0f) * 5.5f), 0, 10);
             int bin_p = std::clamp(static_cast<int>((phi + 1.0f)   * 5.5f), 0, 10);
             int bin_t = std::clamp(static_cast<int>((theta / M_PI + 1.0f) * 5.5f), 0, 10);
@@ -180,7 +162,6 @@ FPFHFeatures Registration::computeFPFH(const PointCloud& cloud, float radius) {
             hist[22 + bin_t] += 1.0f;
         }
 
-        // Normalize
         float sum = 0;
         for (float v : hist) sum += v;
         if (sum > 0) for (float& v : hist) v /= sum;
@@ -188,18 +169,14 @@ FPFHFeatures Registration::computeFPFH(const PointCloud& cloud, float radius) {
         return hist;
     };
 
-    // Compute SPFH for all points
     std::vector<std::array<float, 33>> spfh(cloud.size());
     for (size_t i = 0; i < cloud.size(); ++i) {
         spfh[i] = computeSPFH(i);
     }
-
-    // Compute FPFH = weighted sum of SPFH of neighbors
     for (size_t i = 0; i < cloud.size(); ++i) {
         auto neighbors = findRadiusNN(cloud.points, cloud.points[i], radius, 100);
         std::array<float, 33> fpfh{};
 
-        // Start with own SPFH
         for (int d = 0; d < 33; ++d) fpfh[d] = spfh[i][d];
 
         for (size_t ni : neighbors) {
@@ -212,7 +189,6 @@ FPFHFeatures Registration::computeFPFH(const PointCloud& cloud, float radius) {
             }
         }
 
-        // Normalize
         float sum = 0;
         for (float v : fpfh) sum += v;
         if (sum > 0) for (float& v : fpfh) v /= sum;
@@ -224,9 +200,6 @@ FPFHFeatures Registration::computeFPFH(const PointCloud& cloud, float radius) {
     return features;
 }
 
-// ─────────────────────────────────────────────────
-//  RANSAC Global Registration
-// ─────────────────────────────────────────────────
 
 RegistrationResult Registration::ransacRegistration(
     const PointCloud& source,
@@ -240,7 +213,6 @@ RegistrationResult Registration::ransacRegistration(
     float distance_threshold = voxel_size * 1.5f;
     std::cout << "RANSAC registration (threshold=" << distance_threshold << ", max_iter=" << max_iterations << ")\n";
 
-    // Precompute feature correspondences: for each source point, find best match in target
     std::vector<size_t> correspondences(source.size());
     for (size_t i = 0; i < source.size(); ++i) {
         float best_dist = std::numeric_limits<float>::max();
@@ -264,7 +236,6 @@ RegistrationResult Registration::ransacRegistration(
     std::uniform_int_distribution<size_t> dist(0, source.size() - 1);
 
     for (int iter = 0; iter < max_iterations; ++iter) {
-        // Sample 3 random correspondences
         size_t i0 = dist(rng), i1 = dist(rng), i2 = dist(rng);
         if (i0 == i1 || i1 == i2 || i0 == i2) continue;
 
@@ -274,7 +245,6 @@ RegistrationResult Registration::ransacRegistration(
         tgt_pts.col(1) = target.points[correspondences[i1]];
         tgt_pts.col(2) = target.points[correspondences[i2]];
 
-        // Compute rigid transform using SVD
         Eigen::Vector3f src_centroid = src_pts.rowwise().mean();
         Eigen::Vector3f tgt_centroid = tgt_pts.rowwise().mean();
 
@@ -285,7 +255,6 @@ RegistrationResult Registration::ransacRegistration(
         Eigen::JacobiSVD<Eigen::Matrix3f> svd(H, Eigen::ComputeFullU | Eigen::ComputeFullV);
         Eigen::Matrix3f R = svd.matrixV() * svd.matrixU().transpose();
 
-        // Ensure proper rotation (det = +1)
         if (R.determinant() < 0) {
             Eigen::Matrix3f V = svd.matrixV();
             V.col(2) *= -1;
@@ -298,7 +267,6 @@ RegistrationResult Registration::ransacRegistration(
         transform.block<3,3>(0,0) = R;
         transform.block<3,1>(0,3) = t;
 
-        // Count inliers
         int inliers = 0;
         float total_error = 0;
         for (size_t i = 0; i < source.size(); ++i) {
@@ -319,17 +287,12 @@ RegistrationResult Registration::ransacRegistration(
             best_result.rmse = rmse;
         }
 
-        // Early termination
         if (fitness > confidence) break;
     }
 
     std::cout << "RANSAC result: fitness=" << best_result.fitness << ", RMSE=" << best_result.rmse << "\n";
     return best_result;
 }
-
-// ─────────────────────────────────────────────────
-//  ICP Refinement (Point-to-Plane)
-// ─────────────────────────────────────────────────
 
 RegistrationResult Registration::icpRefine(
     const PointCloud& source,
@@ -351,21 +314,16 @@ RegistrationResult Registration::icpRefine(
         Eigen::Matrix3f R = T.block<3,3>(0,0);
         Eigen::Vector3f t = T.block<3,1>(0,3);
 
-        // Find correspondences and build linear system
         int n_corr = 0;
         float total_error = 0;
 
-        // For point-to-plane: solve 6x6 linear system
         Eigen::Matrix<float, 6, 6> ATA = Eigen::Matrix<float, 6, 6>::Zero();
         Eigen::Matrix<float, 6, 1> ATb = Eigen::Matrix<float, 6, 1>::Zero();
 
-        // For point-to-point: accumulate for SVD
         std::vector<Eigen::Vector3f> src_corr, tgt_corr;
 
         for (size_t i = 0; i < source.size(); ++i) {
             Eigen::Vector3f p = R * source.points[i] + t;
-
-            // Find nearest neighbor in target (brute-force)
             float best_dist2 = std::numeric_limits<float>::max();
             size_t best_idx = 0;
             for (size_t j = 0; j < target.size(); ++j) {
@@ -383,7 +341,6 @@ RegistrationResult Registration::icpRefine(
             total_error += best_dist2;
 
             if (point_to_plane && target.hasNormals()) {
-                // Point-to-plane linearized system
                 const Eigen::Vector3f& q = target.points[best_idx];
                 const Eigen::Vector3f& n = target.normals[best_idx];
                 Eigen::Vector3f cross = p.cross(n);
@@ -406,17 +363,14 @@ RegistrationResult Registration::icpRefine(
         Eigen::Matrix4f delta = Eigen::Matrix4f::Identity();
 
         if (point_to_plane && target.hasNormals()) {
-            // Solve ATA * x = -ATb
             Eigen::Matrix<float, 6, 1> x = ATA.ldlt().solve(-ATb);
 
-            // x = [alpha, beta, gamma, tx, ty, tz]
             float a = x(0), b = x(1), g = x(2);
             delta.block<3,3>(0,0) = (Eigen::AngleAxisf(a, Eigen::Vector3f::UnitX())
                                    * Eigen::AngleAxisf(b, Eigen::Vector3f::UnitY())
                                    * Eigen::AngleAxisf(g, Eigen::Vector3f::UnitZ())).matrix();
             delta.block<3,1>(0,3) = x.tail<3>();
         } else {
-            // Point-to-point using SVD
             Eigen::Vector3f src_mean = Eigen::Vector3f::Zero();
             Eigen::Vector3f tgt_mean = Eigen::Vector3f::Zero();
             for (size_t i = 0; i < src_corr.size(); ++i) {
@@ -449,7 +403,6 @@ RegistrationResult Registration::icpRefine(
         result.fitness = static_cast<float>(n_corr) / source.size();
         result.transformation = T;
 
-        // Convergence check
         if (iter > 0 && std::abs(prev_rmse - result.rmse) < 1e-6f) {
             std::cout << "ICP converged at iteration " << iter << "\n";
             break;
@@ -460,10 +413,6 @@ RegistrationResult Registration::icpRefine(
     return result;
 }
 
-// ─────────────────────────────────────────────────
-//  Load Reference Model (PLY)
-// ─────────────────────────────────────────────────
-
 PointCloud Registration::loadReferenceModel(const std::string& path) {
     PointCloud cloud;
 
@@ -473,7 +422,6 @@ PointCloud Registration::loadReferenceModel(const std::string& path) {
         return cloud;
     }
 
-    // Simple PLY parser (ASCII format support)
     std::string line;
     int vertex_count = 0;
     bool has_color = false;
@@ -502,12 +450,9 @@ PointCloud Registration::loadReferenceModel(const std::string& path) {
         if (has_color) {
             float r, g, b;
             file >> r >> g >> b;
-            // Normalize to [0, 1] if values > 1
             if (r > 1.0f) { r /= 255.0f; g /= 255.0f; b /= 255.0f; }
             cloud.colors.push_back(Eigen::Vector3f(r, g, b));
         }
-
-        // Skip remaining properties on the line
         std::getline(file, line);
     }
 
@@ -515,4 +460,4 @@ PointCloud Registration::loadReferenceModel(const std::string& path) {
     return cloud;
 }
 
-}  // namespace industry_picking
+}

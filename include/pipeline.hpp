@@ -62,8 +62,3 @@ private:
 };
 
 }  // namespace industry_picking
-// Edit
-// Edit
-// Edit
-// Edit
-// Edit

@@ -7,37 +7,40 @@
 namespace industry_picking {
 namespace cuda {
 
+
 __global__ void deprojectKernel(
-    const float* __restrict__         depth,
-    const unsigned char* __restrict__ rgb,
-    float* __restrict__               out_points,
-    int* __restrict__                 out_count,
+    const float*          __restrict__ depth,
+    const unsigned char*  __restrict__ rgb,
+    float*                __restrict__ out_points,
+    int*                  __restrict__ out_count,
     int width, int height,
-    float fx, float fy, float cx, float cy,
-    float max_depth
+    float fx_inv, float fy_inv,
+    float cx, float cy,
+    float max_depth,
+    int   max_points 
 ) {
     int u = blockIdx.x * blockDim.x + threadIdx.x;
     int v = blockIdx.y * blockDim.y + threadIdx.y;
     if (u >= width || v >= height) return;
 
     int pixel_idx = v * width + u;
-    float z = depth[pixel_idx];
-
-    // Skip invalid depth
+    float z = __ldg(&depth[pixel_idx]);
     if (z <= 0.0f || z > max_depth) return;
 
-    // Deprojection
-    float x = (static_cast<float>(u) - cx) * z / fx;
-    float y = (static_cast<float>(v) - cy) * z / fy;
+    float x = (static_cast<float>(u) - cx) * z * fx_inv;
+    float y = (static_cast<float>(v) - cy) * z * fy_inv;
 
-    // Get RGB (BGR format from OpenCV)
-    int rgb_idx = pixel_idx * 3;
-    float r = static_cast<float>(rgb[rgb_idx + 2]) / 255.0f;
-    float g = static_cast<float>(rgb[rgb_idx + 1]) / 255.0f;
-    float b = static_cast<float>(rgb[rgb_idx + 0]) / 255.0f;
+    int rgb_base = pixel_idx * 3;
+    float r = static_cast<float>(__ldg(&rgb[rgb_base + 2])) * (1.0f / 255.0f);
+    float g = static_cast<float>(__ldg(&rgb[rgb_base + 1])) * (1.0f / 255.0f);
+    float b = static_cast<float>(__ldg(&rgb[rgb_base + 0])) * (1.0f / 255.0f);
 
-    // Atomic insert into output array
     int out_idx = atomicAdd(out_count, 1);
+    if (out_idx >= max_points) {
+        atomicSub(out_count, 1);
+        return;
+    }
+
     int base = out_idx * 6;
     out_points[base + 0] = x;
     out_points[base + 1] = y;
@@ -48,34 +51,39 @@ __global__ void deprojectKernel(
 }
 
 void launchDeproject(
-    const float* depth,
+    const float*         depth,
     const unsigned char* rgb,
-    float* out_points,
-    int* out_count,
+    float*               out_points,
+    int*                 out_count,
     int width, int height,
-    float fx, float fy, float cx, float cy,
+    float fx, float fy,
+    float cx, float cy,
     float max_depth
 ) {
-    // Reset counter
     cudaMemset(out_count, 0, sizeof(int));
 
-    dim3 block(16, 16);
-    dim3 grid((width + block.x - 1) / block.x,
+    dim3 block(32, 8);
+    dim3 grid((width  + block.x - 1) / block.x,
               (height + block.y - 1) / block.y);
 
     deprojectKernel<<<grid, block>>>(
-        depth, rgb, out_points, out_count,
-        width, height, fx, fy, cx, cy, max_depth
+        depth, rgb,
+        out_points, out_count,
+        width, height,
+        1.0f / fx, 1.0f / fy,
+        cx, cy,
+        max_depth,
+        width * height
     );
 
     cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("CUDA deproject error: %s\n", cudaGetErrorString(err));
-    }
+    if (err != cudaSuccess)
+        fprintf(stderr, "[Deproject] CUDA error: %s\n", cudaGetErrorString(err));
+
     cudaDeviceSynchronize();
 }
 
-}  // namespace cuda
-}  // namespace industry_picking
+}
+}
 
-#endif  // CUDA_AVAILABLE
+#endif

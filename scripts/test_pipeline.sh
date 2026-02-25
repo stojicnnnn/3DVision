@@ -10,5 +10,3 @@ make -j$(nproc)
 echo "Running Pipeline Test..."
 ./industry_picking ../config/pipeline_config.yaml
 echo "Test Passed."
-
-// Edit

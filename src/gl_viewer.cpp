@@ -13,16 +13,13 @@
 
 namespace industry_picking {
 
-// ─── GLFW Callbacks (forward to viewer instance) ───
 
 static GLViewer* g_viewer = nullptr;
 
 static void scrollCallback(GLFWwindow*, double, double yoffset) {
     if (!g_viewer) return;
-    // Accessed directly — camera member pointers would be cleaner but this is minimal
 }
 
-// ─── Constructor / Destructor ───
 
 GLViewer::GLViewer(int width, int height, const std::string& title)
     : width_(width), height_(height), title_(title) {
@@ -32,7 +29,6 @@ GLViewer::~GLViewer() {
     stop();
 }
 
-// ─── Start / Stop ───
 
 bool GLViewer::start() {
     if (running_.load()) return true;
@@ -50,7 +46,6 @@ void GLViewer::stop() {
     running_.store(false);
 }
 
-// ─── Thread-safe data setters ───
 
 void GLViewer::setPointCloud(const std::string& name, const PointCloud& cloud) {
     std::lock_guard<std::mutex> lock(data_mutex_);
@@ -95,7 +90,6 @@ void GLViewer::clear() {
     path_.clear();
 }
 
-// ─── Shader helpers ───
 
 unsigned int GLViewer::loadShaderFromFile(const std::string& path, unsigned int type) {
     std::ifstream file(path);
@@ -147,13 +141,11 @@ unsigned int GLViewer::compileShader(const std::string& vertPath, const std::str
     return program;
 }
 
-// ─── Main Render Loop ───
 
 void GLViewer::renderLoop() {
     g_viewer = this;
     running_.store(true);
 
-    // Init GLFW (must be on the rendering thread)
     if (!glfwInit()) {
         std::cerr << "Failed to initialize GLFW\n";
         running_.store(false);
@@ -174,7 +166,6 @@ void GLViewer::renderLoop() {
     window_ = win;
     glfwMakeContextCurrent(win);
 
-    // Init GLEW
     glewExperimental = GL_TRUE;
     if (glewInit() != GLEW_OK) {
         std::cerr << "Failed to initialize GLEW\n";
@@ -188,17 +179,14 @@ void GLViewer::renderLoop() {
     glEnable(GL_PROGRAM_POINT_SIZE);
     glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
 
-    // Compile shaders
     cloud_shader_ = compileShader("shaders/pointcloud.vert", "shaders/pointcloud.frag");
     line_shader_  = compileShader("shaders/axes.vert", "shaders/axes.frag");
 
-    // Set scroll callback
     glfwSetScrollCallback(win, [](GLFWwindow*, double, double yoffset) {
         if (g_viewer) g_viewer->cam_distance_ -= static_cast<float>(yoffset) * 0.1f;
         if (g_viewer) g_viewer->cam_distance_ = std::max(0.1f, g_viewer->cam_distance_);
     });
 
-    // ─── Render loop ───
     while (!glfwWindowShouldClose(win) && !should_stop_.load()) {
         glfwPollEvents();
         processInput();
@@ -210,7 +198,6 @@ void GLViewer::renderLoop() {
         glfwSwapBuffers(win);
     }
 
-    // Cleanup
     cleanupGL();
     glfwDestroyWindow(win);
     glfwTerminate();
@@ -240,7 +227,6 @@ void GLViewer::processInput() {
         if (mouse_dragging_) {
             float dx = static_cast<float>(mx - last_mouse_x_) * 0.001f * cam_distance_;
             float dy = static_cast<float>(my - last_mouse_y_) * 0.001f * cam_distance_;
-            // Pan
             float yaw_rad = cam_yaw_ * M_PI / 180.0f;
             cam_target_.x() -= dx * std::cos(yaw_rad);
             cam_target_.z() -= dx * std::sin(yaw_rad);
@@ -261,7 +247,6 @@ void GLViewer::render() {
     if (w == 0 || h == 0) return;
     glViewport(0, 0, w, h);
 
-    // ─── Camera matrix ───
     float yaw_rad   = cam_yaw_   * M_PI / 180.0f;
     float pitch_rad = cam_pitch_ * M_PI / 180.0f;
 
@@ -279,7 +264,6 @@ void GLViewer::render() {
 
     std::lock_guard<std::mutex> lock(data_mutex_);
 
-    // ─── Render point clouds ───
     if (cloud_shader_) {
         glUseProgram(cloud_shader_);
         int vpLoc = glGetUniformLocation(cloud_shader_, "uVP");
@@ -298,11 +282,10 @@ void GLViewer::render() {
                 glBufferData(GL_ARRAY_BUFFER,
                     rc.vertices.size() * sizeof(float),
                     rc.vertices.data(), GL_DYNAMIC_DRAW);
-
-                // Position: 3 floats
+                    
                 glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
                 glEnableVertexAttribArray(0);
-                // Color: 3 floats
+
                 glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
                 glEnableVertexAttribArray(1);
 
@@ -314,7 +297,6 @@ void GLViewer::render() {
         }
     }
 
-    // ─── Render pose frames (as colored lines) ───
     if (line_shader_) {
         glUseProgram(line_shader_);
         int vpLoc = glGetUniformLocation(line_shader_, "uVP");
@@ -326,15 +308,11 @@ void GLViewer::render() {
             Eigen::Vector3f y_axis = origin + rp.transform.block<3,1>(0,1) * rp.length;
             Eigen::Vector3f z_axis = origin + rp.transform.block<3,1>(0,2) * rp.length;
 
-            // 3 lines × 2 vertices × 6 floats (xyz + rgb)
             float lines[] = {
-                // X axis (red)
                 origin.x(), origin.y(), origin.z(), 1.0f, 0.0f, 0.0f,
                 x_axis.x(), x_axis.y(), x_axis.z(), 1.0f, 0.0f, 0.0f,
-                // Y axis (green)
                 origin.x(), origin.y(), origin.z(), 0.0f, 1.0f, 0.0f,
                 y_axis.x(), y_axis.y(), y_axis.z(), 0.0f, 1.0f, 0.0f,
-                // Z axis (blue)
                 origin.x(), origin.y(), origin.z(), 0.0f, 0.0f, 1.0f,
                 z_axis.x(), z_axis.y(), z_axis.z(), 0.0f, 0.0f, 1.0f,
             };
@@ -356,7 +334,6 @@ void GLViewer::render() {
             glDrawArrays(GL_LINES, 0, 6);
         }
 
-        // ─── Render path ───
         if (!path_.empty()) {
             std::vector<float> path_verts;
             path_verts.reserve(path_.size() * 6);
@@ -366,7 +343,7 @@ void GLViewer::render() {
                 path_verts.push_back(p.z());
                 path_verts.push_back(1.0f);
                 path_verts.push_back(1.0f);
-                path_verts.push_back(0.0f);  // Yellow
+                path_verts.push_back(0.0f);
             }
 
             if (path_vao_ == 0) {
@@ -397,7 +374,6 @@ void GLViewer::initGL() {
 }
 
 void GLViewer::cleanupGL() {
-    // Cleanup VAOs/VBOs
     for (auto& [name, rc] : clouds_) {
         if (rc.vao) glDeleteVertexArrays(1, &rc.vao);
         if (rc.vbo) glDeleteBuffers(1, &rc.vbo);
@@ -411,4 +387,4 @@ void GLViewer::cleanupGL() {
     if (line_shader_) glDeleteProgram(line_shader_);
 }
 
-}  // namespace industry_picking
+}

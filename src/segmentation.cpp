@@ -17,7 +17,6 @@ std::vector<cv::Mat> Segmentation::loadMasksFromDir(const std::string& masks_dir
         return masks;
     }
 
-    // Collect all image files, sorted
     std::vector<fs::path> files;
     for (const auto& entry : fs::directory_iterator(masks_dir)) {
         auto ext = entry.path().extension().string();
@@ -47,8 +46,6 @@ std::vector<cv::Mat> Segmentation::getMasksFromSAM(
     const std::string& server_url,
     const std::string& query
 ) {
-    // TODO: Implement HTTP POST to SAM server using libcurl or cpp-httplib
-    // For now, this is a stub that always returns empty
     std::cerr << "SAM server integration not yet implemented in C++.\n";
     std::cerr << "Falling back to local mask loading.\n";
     return {};
@@ -60,14 +57,12 @@ std::vector<cv::Mat> Segmentation::getMasks(
     const std::string& sam_query,
     const std::string& masks_dir
 ) {
-    // Try SAM server first
     if (!sam_server_url.empty()) {
         auto masks = getMasksFromSAM(rgb_image, sam_server_url, sam_query);
         if (!masks.empty()) return masks;
     }
 
-    // Fallback to local directory
     return loadMasksFromDir(masks_dir);
 }
 
-}  // namespace industry_picking
+}

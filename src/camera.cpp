@@ -96,4 +96,4 @@ float RealSenseCamera::getDepthScale() const {
     return depth_scale_;
 }
 
-}  // namespace industry_picking
+} 

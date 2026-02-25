@@ -11,14 +11,6 @@
 
 namespace industry_picking {
 
-/**
- * @brief A simple, header-only C++17 thread pool.
- *
- * Usage:
- *   ThreadPool pool(8);
- *   auto future = pool.enqueue([](int x) { return x * 2; }, 42);
- *   int result = future.get();  // 84
- */
 class ThreadPool {
 public:
     explicit ThreadPool(size_t num_threads) : stop_(false) {
@@ -52,13 +44,9 @@ public:
         }
     }
 
-    // Non-copyable, non-movable
     ThreadPool(const ThreadPool&) = delete;
     ThreadPool& operator=(const ThreadPool&) = delete;
 
-    /**
-     * @brief Enqueue a task and return a future for its result.
-     */
     template<typename F, typename... Args>
     auto enqueue(F&& f, Args&&... args)
         -> std::future<std::invoke_result_t<F, Args...>>
@@ -91,4 +79,4 @@ private:
     bool                              stop_;
 };
 
-}  // namespace industry_picking
+}

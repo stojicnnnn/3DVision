@@ -11,13 +11,13 @@ enum class VizBackend { NONE, OPENGL };
 struct CameraConfig {
     int width  = 1280;
     int height = 720;
-    std::string ip;  // Empty for USB cameras
+    std::string ip;
 };
 
 struct DepthConfig {
-    float scale_to_meters = 1000.0f;  // Raw depth units per meter
-    float clipping_min    = 0.1f;     // Min depth in meters
-    float clipping_max    = 1.5f;     // Max depth in meters
+    float scale_to_meters  = 1000.0f;
+    float clipping_min     = 0.1f;
+    float clipping_max     = 1.5f;
     bool  bilateral_filter = false;
 };
 
@@ -34,7 +34,7 @@ struct RegistrationConfig {
 struct RobotConfig {
     std::string ip        = "192.168.1.184";
     int         speed     = 80;
-    float       approach_offset_z = -0.101f;  // meters
+    float       approach_offset_z = -0.101f;
 };
 
 struct SegmentationConfig {
@@ -53,23 +53,18 @@ struct PipelineConfig {
 
     std::string reference_model_path;
 
-    // Hardware flags
     bool use_camera = true;
     bool use_robot  = true;
 
-    // Dummy data (if use_camera = false)
     std::string dummy_rgb_path;
     std::string dummy_depth_path;
 
-    // Concurrency
     int  num_threads = 8;
     bool use_gpu     = true;
 
-    // Visualization
     VizBackend viz_backend = VizBackend::OPENGL;
 
-    // Camera extrinsics (4x4, row-major)
     Eigen::Matrix4f camera_extrinsics = Eigen::Matrix4f::Identity();
 };
 
-}  // namespace industry_picking
+}

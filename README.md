@@ -1,34 +1,3 @@
-# 3DVision — GPU-Accelerated Industrial Picking Pipeline
-
-Real-time 3D vision pipeline for robotic bin-picking. Captures depth data, segments objects, aligns them against a reference model using RANSAC + ICP, and sends pick poses to a robotic arm.
-
-Built with C++17, CUDA, OpenGL, and Eigen. Designed for sub-second cycle times on commodity NVIDIA GPUs.
-
-## Architecture
-
-```
-RealSense Camera ──► Depth Preprocessing (CUDA) ──► Point Cloud Generation (CUDA)
-                                                            │
-SAM2 Segmentation ◄── RGB Frame                            │
-       │                                                    │
-       ▼                                                    ▼
-  Instance Masks ──► Masked Depth ──► Per-Object Point Cloud
-                                            │
-                                            ▼
-                                  FPFH Feature Extraction
-                                            │
-                                            ▼
-                              RANSAC Global Registration
-                                            │
-                                            ▼
-                                   ICP Refinement (CUDA)
-                                            │
-                                            ▼
-                                 6-DoF Pick Pose ──► xArm Robot
-```
-
-Processing is parallelized across detected instances using a thread pool. The OpenGL viewer renders point clouds, coordinate frames, and planned pick paths in real time.
-
 ## Quick Start (Demo Mode)
 
 No camera or robot required. The pipeline generates a procedural test scene and runs the full registration stack on it.

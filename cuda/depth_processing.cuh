@@ -7,7 +7,7 @@
 namespace industry_picking {
 namespace cuda {
 
- */
+
 void launchDepthPreprocess(
     const unsigned short* raw_depth,
     const unsigned char* mask,

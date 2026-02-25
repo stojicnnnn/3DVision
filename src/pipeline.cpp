@@ -105,11 +105,20 @@ std::optional<Eigen::Matrix4f> Pipeline::processInstance(
         RegistrationResult refined;
 
         if (config_.use_gpu && GPURegistration::isCudaAvailable()) {
-            refined = GPURegistration::icpRefine(
-                source_down, ref_cloud,
-                coarse.transformation, icp_threshold,
-                config_.registration.icp_max_iterations
-            );
+            try {
+                refined = GPURegistration::icpRefine(
+                    source_down, ref_cloud,
+                    coarse.transformation, icp_threshold,
+                    config_.registration.icp_max_iterations
+                );
+            } catch (...) {
+                refined = Registration::icpRefine(
+                    source_down, ref_cloud,
+                    coarse.transformation, icp_threshold,
+                    config_.registration.icp_max_iterations,
+                    config_.registration.use_point_to_plane
+                );
+            }
         } else {
             refined = Registration::icpRefine(
                 source_down, ref_cloud,
@@ -287,6 +296,23 @@ void Pipeline::run() {
     if (config_.viz_backend == VizBackend::OPENGL) {
         viewer_ = std::make_unique<GLViewer>();
         viewer_->start();
+
+        float fx = K(0,0), fy = K(1,1), cx_k = K(0,2), cy_k = K(1,2);
+        PointCloud scene_cloud;
+        for (int v = 0; v < depth.rows; v += 2) {
+            for (int u = 0; u < depth.cols; u += 2) {
+                float z = depth.at<unsigned short>(v, u) / config_.depth.scale_to_meters;
+                if (z <= 0 || z > config_.depth.clipping_max) continue;
+                float x = (u - cx_k) * z / fx;
+                float y = (v - cy_k) * z / fy;
+                scene_cloud.points.emplace_back(x, y, z);
+                if (!rgb.empty()) {
+                    cv::Vec3b bgr = rgb.at<cv::Vec3b>(v, u);
+                    scene_cloud.colors.emplace_back(bgr[2]/255.f, bgr[1]/255.f, bgr[0]/255.f);
+                }
+            }
+        }
+        if (!scene_cloud.empty()) viewer_->setPointCloud("scene", scene_cloud);
     }
 
     std::cout << "\n[4/5] Processing " << masks.size() << " instances (parallel)...\n";
